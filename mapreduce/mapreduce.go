@@ -2,21 +2,21 @@ package mapreduce
 
 import "sync"
 
-// TODO: InitMap and FinalizeMap
-
 type EmitFunc[NK comparable, NV any] func(NK, NV)
 
-type Mapper[K comparable, V any, NK comparable, NV any] func(EmitFunc[NK, NV], K, V)
+type Mapper[K comparable, V any, NK comparable, NV any, DS any] func(EmitFunc[NK, NV], K, V, DS)
 type Reducer[NK comparable, NV any] func(EmitFunc[NK, NV], NK, []NV)
 
-type MapReduce[K comparable, V any, NK comparable, NV any] struct {
-	mapper  Mapper[K, V, NK, NV]
-	reducer Reducer[NK, NV]
-	workers int
+type MapReduce[K comparable, V any, NK comparable, NV any, DS any] struct {
+	mapper      Mapper[K, V, NK, NV, DS]
+	reducer     Reducer[NK, NV]
+	workers     int
+	initMap     func() DS
+	finalizeMap func(EmitFunc[NK, NV], DS)
 }
 
-func New[K comparable, V any, NK comparable, NV any](mapper Mapper[K, V, NK, NV], reducer Reducer[NK, NV], workers int) MapReduce[K, V, NK, NV] {
-	return MapReduce[K, V, NK, NV]{
+func New[K comparable, V any, NK comparable, NV any, DS any](mapper Mapper[K, V, NK, NV, DS], reducer Reducer[NK, NV], workers int) MapReduce[K, V, NK, NV, DS] {
+	return MapReduce[K, V, NK, NV, DS]{
 		mapper:  mapper,
 		reducer: reducer,
 		workers: workers,
@@ -33,7 +33,7 @@ type Pair[K comparable, V any] struct {
 	value V
 }
 
-func (m MapReduce[K, V, NK, NV]) Run(dict map[K]V) map[NK]NV {
+func (m *MapReduce[K, V, NK, NV, DS]) Run(dict map[K]V) map[NK]NV {
 	var intermediate sync.Map
 	emit := func(k NK, v NV) {
 		l, _ := intermediate.LoadOrStore(k, &SafeList[NV]{})
@@ -58,9 +58,16 @@ func (m MapReduce[K, V, NK, NV]) Run(dict map[K]V) map[NK]NV {
 
 		go func(start int, end int) {
 			defer wg.Done()
+			var initMapResult DS
+			if m.initMap != nil {
+				initMapResult = m.initMap()
+			}
 			for i := start; i < end; i++ {
 				pair := mapPairs[i]
-				m.mapper(emit, pair.key, pair.value)
+				m.mapper(emit, pair.key, pair.value, initMapResult)
+			}
+			if m.finalizeMap != nil {
+				m.finalizeMap(emit, initMapResult)
 			}
 		}(start, end)
 	}
@@ -105,4 +112,12 @@ func (m MapReduce[K, V, NK, NV]) Run(dict map[K]V) map[NK]NV {
 	})
 
 	return result
+}
+
+func (m *MapReduce[K, V, NK, NV, DS]) SetInitMap(initMap func() DS) {
+	m.initMap = initMap
+}
+
+func (m *MapReduce[K, V, NK, NV, DS]) SetFinalizeMap(finalizeMap func(EmitFunc[NK, NV], DS)) {
+	m.finalizeMap = finalizeMap
 }
