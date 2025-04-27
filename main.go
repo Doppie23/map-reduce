@@ -13,6 +13,9 @@ type ExampleStruct struct {
 }
 
 func main() {
+	// below is an example that counts the total occurances of words in different documents
+	// this example uses some aggregation in the map phase using InitMap and FinalizeMap as discussed on slide 24
+
 	map_ := func(emit mapreduce.EmitFunc[string, int], k int, v string, es *ExampleStruct) {
 		for _, v := range strings.Split(v, " ") {
 			if i, ok := es.m[v]; ok {
